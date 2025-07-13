@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>RestroomAd Player</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/player/style.css" />
+  <script src="/player/player.js" defer></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: black;
+      width: 100%;
+      height: 100%;
+    }
+  
+    #player {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: black;
+    }
+  
+    video, img {
+      width: 100vw;
+      height: 100vh;
+      object-fit: contain; /* or cover if you want to crop */
+    }
+  </style>  
+</head>
+<body>
+  <div style="position: relative; width:100%; height:100vh;">
+    <!-- Player container -->
+    <div id="player" style="width:100%; height:100vh; background:black; position: relative; z-index: 1;"></div>
+    
+    <!-- Invisible overlay that blocks all touches -->
+    <div id="touch-blocker" style="
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9999;
+      background: transparent;
+    "></div>
+  </div>
+
+  <canvas id="snapshotCanvas" style="display:none;"></canvas>
+  <div id="touch-blocker" style="position:fixed; top:0; left:0; width:100%; height:100vh; z-index:9999;"></div>
+
+  <div id="admin-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:2rem; border-radius:10px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:10000;">
+    <h2 style="font-size:1.5rem; margin-bottom:1rem;">🔧 Admin Access</h2>
+    <button onclick="resumePlayback()" style="margin-right:1rem;">▶ Resume</button>
+    <button onclick="window.location.href='/'">🏠 Exit</button>
+  </div>
+
+</body>
+</html>
