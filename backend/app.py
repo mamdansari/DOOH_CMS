@@ -10,6 +10,12 @@ from db_utils import initialize_database
 initialize_database()
 
 
+import os
+
+# Ensure uploads folder exists
+os.makedirs('backend/uploads', exist_ok=True)
+
+
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
