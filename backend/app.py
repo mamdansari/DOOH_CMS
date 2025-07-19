@@ -6,6 +6,10 @@ import time
 import glob
 import json
 
+from db_utils import initialize_database
+initialize_database()
+
+
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
