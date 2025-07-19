@@ -9,15 +9,13 @@ import json
 from db_utils import initialize_database
 initialize_database()
 
-
 import os
 
-# Ensure uploads folder exists
-os.makedirs('backend/uploads', exist_ok=True)
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 
@@ -180,6 +178,7 @@ def content():
         if file and allowed_file(file.filename):
             filename = file.filename
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
             file.save(filepath)
 
             content_type = 'video' if filename.lower().endswith('mp4') else 'image'
