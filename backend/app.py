@@ -406,6 +406,7 @@ def remove_assignment(screen_id, content_id):
 
 @app.route('/api/playlist/<int:screen_id>', methods=['GET'])
 def get_playlist(screen_id):
+    import hashlib
     conn = sqlite3.connect('db.sqlite')
     c = conn.cursor()
 
@@ -419,13 +420,17 @@ def get_playlist(screen_id):
     ''')
     conn.commit()
 
+    # Get screen info
+    c.execute('SELECT restroom, manual_sync_group FROM screens WHERE id = ?', (screen_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Screen not found"}), 404
 
-    # Get screen's group_id
-    c.execute('SELECT group_id FROM screens WHERE id = ?', (screen_id,))
-    group_row = c.fetchone()
-    group_id = group_row[0] if group_row else None
+    restroom, manual_sync_group = row
+    group_id = manual_sync_group if manual_sync_group else restroom
 
-    # Filter out expired content
+    # Get content for this screen
     c.execute('''
         SELECT c.filename
         FROM screen_content sc
@@ -434,12 +439,13 @@ def get_playlist(screen_id):
         AND (c.expires_on IS NULL OR date(c.expires_on) > date('now'))
         ORDER BY sc.play_order ASC
     ''', (screen_id,))
-
+    
     items = c.fetchall()
     conn.close()
 
     playlist = [{"filename": row[0]} for row in items]
-      # Calculate hash
+
+    # Calculate hash for playlist
     hash_input = ''.join(item['filename'] for item in playlist)
     playlist_hash = hashlib.md5(hash_input.encode()).hexdigest()
 

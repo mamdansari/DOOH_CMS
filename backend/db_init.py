@@ -17,6 +17,13 @@ CREATE TABLE IF NOT EXISTS screens (
 )
 ''')
 
+# Add manual_sync_group column if it doesn't exist
+try:
+    conn.execute('ALTER TABLE screens ADD COLUMN manual_sync_group TEXT')
+except sqlite3.OperationalError:
+    pass  # Column already exists
+
+
 # Create Content table
 conn.execute('''
 CREATE TABLE IF NOT EXISTS content (
