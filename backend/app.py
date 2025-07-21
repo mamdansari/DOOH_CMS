@@ -6,6 +6,9 @@ import time
 import glob
 import json
 
+from db_utils import initialize_database
+initialize_database()
+
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
