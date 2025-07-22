@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS screens (
     building TEXT,
     floor TEXT,
     restroom TEXT,
+    manual_sync_group TEXT,
     group_id TEXT,  -- for sync grouping
     status TEXT DEFAULT 'offline',
     last_seen TEXT
