@@ -16,7 +16,6 @@ async function loadPlaylist() {
 
   playlist = data.playlist;
   groupId = data.group_id;
-  console.log("🧩 Using group ID for sync:", groupId);
   currentPlaylistHash = data.hash;  // ✅ Save initial hash
 
   if (groupId) {
@@ -87,13 +86,11 @@ function playItem(index, offset = 0) {
 
     video.addEventListener('loadedmetadata', () => {
       video.currentTime = offset;
-    
-      const remainingTime = (video.duration - offset) * 1000;
-      setTimeout(() => {
-        playItem((index + 1) % playlist.length);
-      }, remainingTime);
     });
-    
+
+    setTimeout(() => {
+      playItem((index + 1) % playlist.length);
+    }, ((video.duration || 10) - offset) * 1000);
   } else {
     const img = document.createElement('img');
     img.src = `/uploads/${item.filename}`;

@@ -11,18 +11,12 @@ CREATE TABLE IF NOT EXISTS screens (
     building TEXT,
     floor TEXT,
     restroom TEXT,
+    manual_sync_group TEXT,
     group_id TEXT,  -- for sync grouping
     status TEXT DEFAULT 'offline',
     last_seen TEXT
 )
 ''')
-
-# Add manual_sync_group column if it doesn't exist
-try:
-    conn.execute('ALTER TABLE screens ADD COLUMN manual_sync_group TEXT')
-except sqlite3.OperationalError:
-    pass  # Column already exists
-
 
 # Create Content table
 conn.execute('''
