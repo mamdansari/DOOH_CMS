@@ -6,14 +6,15 @@ import time
 import glob
 import json
 
-from db_utils import initialize_database
-initialize_database()
-
+import sqlite3
+import db_init 
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+DB_PATH = os.path.join(BASE_DIR, 'db.sqlite')
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -26,7 +27,7 @@ ADMIN_PASSWORD = 'restroomads123'
 
 
 def calculate_uptime_percent(screen_id):
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     now = datetime.now()
@@ -38,7 +39,7 @@ def calculate_uptime_percent(screen_id):
     conn.close()
 
     duration_seconds = (datetime.now() - start_time).total_seconds()
-    expected_pings = max(1, duration_seconds // 30)
+    expected_pings = max(1, duration_seconds // 900) # 900s = 15 minutes
 
     uptime_percent = (ping_count / expected_pings) * 100
     return round(uptime_percent, 1)
@@ -67,52 +68,89 @@ def logout():
 
 import sqlite3
 
+from collections import defaultdict
+
 @app.route('/screens')
 def screens():
     if not session.get('logged_in'):
         return redirect(url_for('index'))
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT id, name, area, building, floor, restroom, status FROM screens')
+    c.execute('SELECT id, name, area, building, floor, restroom, status, is_master FROM screens')
     screens = c.fetchall()
     conn.close()
 
+    # Group screens by location (area/building/floor/restroom)
+    grouped = defaultdict(list)
+    for s in screens:
+        location_key = f"{s[2]} / {s[3]} / {s[4]} / {s[5]}"
+        grouped[location_key].append(s)
+
+    # Start HTML
     html = '''
     <!DOCTYPE html>
-    <html><head><title>Screens</title>
-    <script src="https://cdn.tailwindcss.com"></script></head>
+    <html>
+    <head>
+        <title>Screens</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
     <body class="p-8 bg-gray-100 text-gray-800">
       <h1 class="text-3xl font-bold mb-6">📺 Registered Screens</h1>
-      <table class="w-full bg-white shadow rounded-xl">
-        <thead class="bg-gray-200 text-left text-sm font-semibold">
-          <tr><th class="p-3">Name</th><th class="p-3">Location</th><th class="p-3">Status</th><th class="p-3">Actions</th></tr>
-        </thead><tbody>
     '''
 
-    for s in screens:
+    print("Grouped keys:", grouped.keys())
+
+    # Loop through each location group
+    for location, group_screens in grouped.items():
+        html += f'<h2 class="text-xl font-semibold mt-8 mb-3">{location}</h2>'
+        html += '''
+        <table class="w-full bg-white shadow rounded-xl">
+          <thead class="bg-gray-200 text-left text-sm font-semibold">
+            <tr><th class="p-3">Name</th><th class="p-3">Status</th><th class="p-3">Actions</th></tr>
+          </thead><tbody>
+        '''
+        for s in group_screens:
+            # Add MASTER badge if is_master = 1
+            master_badge = '<span class="ml-2 text-xs bg-yellow-200 px-2 py-1 rounded">MASTER</span>' if s[7] else ''
+            
+            html += f'''
+            <tr class="border-t">
+              <td class="p-3">{s[1]} {master_badge}</td>
+              <td class="p-3">{s[6]}</td>
+              <td class="p-3 space-x-2">
+                  <!-- Delete button -->
+                  <form action="/delete-screen/{s[0]}" method="POST" style="display:inline;" onsubmit="return confirm('Delete this screen?');">
+                      <button class="text-red-600 hover:underline" type="submit">Delete</button>
+                  </form>
+                  <!-- Set master button -->
+                  <form action="/set-master/{s[0]}" method="POST" style="display:inline;">
+                      <button class="text-blue-600 hover:underline" type="submit">Set Master</button>
+                  </form>
+              </td>
+            </tr>
+            '''
+        html += '</tbody></table>'
+
+        # Group-level Sync button
         html += f'''
-        <tr class="border-t">
-        <td class="p-3">{s[1]}</td>
-        <td class="p-3">{s[2]} / {s[3]} / {s[4]} / {s[5]}</td>
-        <td class="p-3">{s[6]}</td>
-        <td class="p-3">
-            <form action="/delete-screen/{s[0]}" method="POST" onsubmit="return confirm('Delete this screen?');">
-            <button class="text-red-600 hover:underline" type="submit">Delete</button>
+            <form action="/sync-group" method="POST" class="mt-2">
+                <input type="hidden" name="location_key" value="{location}">
+                <button type="submit" class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">
+                    Sync This Group
+                </button>
             </form>
-        </td>
-        </tr>
         '''
 
-
+    # Add bottom buttons
     html += '''
-        </tbody></table>
       <a href="/add-screen" class="mt-6 inline-block bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">+ Add Screen</a>
       <a href="/" class="ml-4 inline-block text-blue-500">⬅ Back to Dashboard</a>
     </body></html>
     '''
 
     return html
+
 
 
 @app.route('/add-screen', methods=['GET', 'POST'])
@@ -128,7 +166,7 @@ def add_screen():
         restroom = request.form.get('restroom')
         group_id = request.form.get('restroom')  # simple grouping by restroom
 
-        conn = sqlite3.connect('db.sqlite')
+        conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute('''
             INSERT INTO screens (name, area, building, floor, restroom, group_id)
@@ -183,7 +221,7 @@ def content():
 
             content_type = 'video' if filename.lower().endswith('mp4') else 'image'
 
-            conn = sqlite3.connect('db.sqlite')
+            conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             c.execute('''
                 INSERT INTO content (filename, content_type, tags, category, expires_on)
@@ -197,7 +235,7 @@ def content():
             message = "❌ Invalid file type."
 
     # Show content list
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT id, filename, content_type, tags, category, expires_on FROM content ORDER BY id DESC')
     content_items = c.fetchall()
@@ -262,7 +300,7 @@ def assign():
     if not session.get('logged_in'):
         return redirect(url_for('index'))
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     # Fetch all screens and content
@@ -278,19 +316,18 @@ def assign():
         screen_id = request.form.get('screen_id')
         content_id = request.form.get('content_id')
         play_order = request.form.get('play_order', 1)
-        start_time = request.form.get('start_time', '')
-        end_time = request.form.get('end_time', '')
+        play_duration = int(request.form.get('play_duration', 10)) # default 10s
 
         c.execute('''
-            INSERT INTO screen_content (screen_id, content_id, play_order, start_time, end_time)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (screen_id, content_id, play_order, start_time, end_time))
+        INSERT INTO screen_content (screen_id, content_id, play_order, play_duration)
+        VALUES (?, ?, ?, ?)
+        ''', (screen_id, content_id, play_order, play_duration))
         conn.commit()
         message = "✅ Assigned successfully."
 
     # Show existing assignments
     c.execute('''
-        SELECT s.name, c.filename, sc.play_order, sc.start_time, sc.end_time, sc.screen_id, sc.content_id
+        SELECT s.name, c.filename, sc.play_order, sc.play_duration, sc.screen_id, sc.content_id
         FROM screen_content sc
         JOIN screens s ON s.id = sc.screen_id
         JOIN content c ON c.id = sc.content_id
@@ -318,8 +355,7 @@ def assign():
             {''.join([f'<option value="{c[0]}">{c[1]}</option>' for c in content])}
         </select>
         <input type="number" name="play_order" placeholder="Play Order" class="w-full px-4 py-2 border rounded" />
-        <input type="time" name="start_time" class="w-full px-4 py-2 border rounded" />
-        <input type="time" name="end_time" class="w-full px-4 py-2 border rounded" />
+        <input type="number" name="play_duration" placeholder="Play Duration (seconds)" class="w-full px-4 py-2 border rounded" min="1" step="1" />
         <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Assign</button>
       </form>
 
@@ -329,8 +365,7 @@ def assign():
           <th class="p-3 text-left">Screen</th>
           <th class="p-3 text-left">Content</th>
           <th class="p-3 text-left">Order</th>
-          <th class="p-3 text-left">Start</th>
-          <th class="p-3 text-left">End</th>
+          <th class="p-3 text-left">Duration (s)</th>
           <th class="p-3 text-left">Actions</th>
         </tr></thead><tbody>
     '''
@@ -342,9 +377,8 @@ def assign():
         <td class="p-3">{a[1]}</td>
         <td class="p-3">{a[2]}</td>
         <td class="p-3">{a[3]}</td>
-        <td class="p-3">{a[4]}</td>
         <td class="p-3">
-            <form action="/remove-assignment/{a[5]}/{a[6]}" method="POST" onsubmit="return confirm('Remove this assignment?');">
+            <form action="/remove-assignment/{a[4]}/{a[5]}" method="POST" onsubmit="return confirm('Remove this assignment?');">
             <button class="text-red-600 hover:underline" type="submit">Remove</button>
             </form>
         </td>
@@ -364,7 +398,7 @@ def delete_screen(id):
     if not session.get('logged_in'):
         return redirect(url_for('index'))
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM screens WHERE id = ?', (id,))
     conn.commit()
@@ -378,7 +412,7 @@ def delete_content(id):
         return redirect(url_for('index'))
 
     # Delete file from uploads
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT filename FROM content WHERE id = ?', (id,))
     row = c.fetchone()
@@ -397,7 +431,7 @@ def remove_assignment(screen_id, content_id):
     if not session.get('logged_in'):
         return redirect(url_for('index'))
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM screen_content WHERE screen_id = ? AND content_id = ?', (screen_id, content_id))
     conn.commit()
@@ -409,7 +443,7 @@ def remove_assignment(screen_id, content_id):
 
 @app.route('/api/playlist/<int:screen_id>', methods=['GET'])
 def get_playlist(screen_id):
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     # Remove expired content assignments
@@ -422,28 +456,31 @@ def get_playlist(screen_id):
     ''')
     conn.commit()
 
-
     # Get screen's group_id
     c.execute('SELECT group_id FROM screens WHERE id = ?', (screen_id,))
     group_row = c.fetchone()
-    group_id = group_row[0] if group_row else None
+    group_id = group_row if group_row and group_row is not None else None
 
-    # Filter out expired content
+    # Get content with duration
     c.execute('''
-        SELECT c.filename
+        SELECT c.filename, sc.play_duration
         FROM screen_content sc
         JOIN content c ON sc.content_id = c.id
         WHERE sc.screen_id = ?
         AND (c.expires_on IS NULL OR date(c.expires_on) > date('now'))
         ORDER BY sc.play_order ASC
     ''', (screen_id,))
-
     items = c.fetchall()
     conn.close()
 
-    playlist = [{"filename": row[0]} for row in items]
-      # Calculate hash
-    hash_input = ''.join(item['filename'] for item in playlist)
+    # Build playlist from tuples (filename, duration)
+    playlist = [
+        {"filename": filename, "duration": int(play_duration or 0)}
+        for filename, play_duration in items
+    ]
+
+    # Calculate hash (include duration so changes trigger refresh)
+    hash_input = ''.join(f"{it['filename']}|{it['duration']}" for it in playlist)
     playlist_hash = hashlib.md5(hash_input.encode()).hexdigest()
 
     return jsonify({
@@ -454,14 +491,15 @@ def get_playlist(screen_id):
 
 
 
+
 @app.route('/dashboard')
 def dashboard():
     if not session.get('logged_in'):
         return redirect(url_for('index'))
     
-    mark_offline_screens()  # ✅ Call this before fetching
+    mark_offline_screens()
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, name, area, building, floor, restroom, status, last_seen FROM screens")
     screens = c.fetchall()
@@ -473,7 +511,6 @@ def dashboard():
         if files:
             latest = max(files, key=os.path.getctime)
             snapshots[sid] = os.path.basename(latest)
-
     conn.close()
 
     html = '''
@@ -483,9 +520,14 @@ def dashboard():
     </head>
     <body class="p-8 bg-gray-100 text-gray-800">
       <h1 class="text-3xl font-bold mb-6">📺 Screen Status Dashboard</h1>
+
+      <form method="POST" action="/manual-sync-multiple" id="manual-sync-form">
+      <button type="submit" class="mb-4 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">🔁 Sync Selected Screens</button>
+
       <table class="w-full bg-white shadow rounded-xl text-sm">
         <thead class="bg-gray-200">
           <tr>
+            <th class="p-3"><input type="checkbox" id="select_all" /></th>
             <th class="p-3 text-left">ID</th>
             <th class="p-3 text-left">Name</th>
             <th class="p-3 text-left">Location</th>
@@ -505,6 +547,7 @@ def dashboard():
         uptime = calculate_uptime_percent(s[0])
         html += f'''
         <tr class="border-t">
+          <td class="p-3"><input type="checkbox" name="selected_screens" value="{s[0]}" /></td>
           <td class="p-3">{s[0]}</td>
           <td class="p-3 font-semibold">{s[1]}</td>
           <td class="p-3">{location}</td>
@@ -520,17 +563,26 @@ def dashboard():
               <button class="text-purple-600 hover:underline" type="submit">🔁 Restart Sync</button>
             </form>
           </td>
-                <td class="p-3">
-        {f'<img src="/snapshots/{snapshots[s[0]]}" width="100">' if s[0] in snapshots else 'N/A'}
+          <td class="p-3">
+            {f'<img src="/snapshots/{snapshots[s[0]]}" width="100">' if s[0] in snapshots else 'N/A'}
           </td>
           <td class="p-3">{uptime}%</td>
-
         </tr>
         '''
 
     html += '''
         </tbody></table>
-        <a href="/" class="mt-6 inline-block text-blue-500">⬅ Back to Home</a>
+      </form>
+
+      <a href="/" class="mt-6 inline-block text-blue-500">⬅ Back to Home</a>
+
+      <script>
+        document.getElementById('select_all').addEventListener('change', function() {
+          let checked = this.checked;
+          document.querySelectorAll('input[name="selected_screens"]').forEach(cb => cb.checked = checked);
+        });
+      </script>
+
     </body></html>
     '''
 
@@ -543,7 +595,7 @@ def manual_snapshot():
     if not screen_id:
         return "Missing screen_id", 400
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     # Insert or update the screen_flags row for this screen_id
@@ -565,7 +617,7 @@ def manual_sync():
     if not screen_id:
         return "Missing screen_id", 400
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     # Insert or update the screen_flags row for this screen_id
@@ -584,7 +636,7 @@ def manual_sync():
 
 @app.route('/api/screen-flags/<int:screen_id>', methods=['GET'])
 def get_screen_flags(screen_id):
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('SELECT force_snapshot, force_resync FROM screen_flags WHERE screen_id = ?', (screen_id,))
     row = c.fetchone()
@@ -610,7 +662,7 @@ def clear_snapshot_flag():
     if not screen_id:
         return {"error": "Missing screen_id"}, 400
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('UPDATE screen_flags SET force_snapshot=0 WHERE screen_id=?', (screen_id,))
     conn.commit()
@@ -624,7 +676,7 @@ def clear_sync_flag():
     if not screen_id:
         return {"error": "Missing screen_id"}, 400
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('UPDATE screen_flags SET force_resync=0 WHERE screen_id=?', (screen_id,))
     conn.commit()
@@ -692,7 +744,7 @@ def api_ping():
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     # Update screen status + last seen
@@ -712,10 +764,10 @@ def api_ping():
 from datetime import datetime, timedelta
 
 def mark_offline_screens():
-    threshold = datetime.now() - timedelta(minutes=30)  #  minutes threshold
+    threshold = datetime.now() - timedelta(minutes=45)  #  minutes threshold
     threshold_str = threshold.strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = sqlite3.connect('db.sqlite')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE screens SET status = 'offline' WHERE last_seen < ?", (threshold_str,))
     conn.commit()
@@ -725,6 +777,139 @@ def mark_offline_screens():
 @app.route('/snapshots/<path:filename>')
 def serve_snapshot(filename):
     return send_from_directory(os.path.join(app.root_path, 'snapshots'), filename)
+
+
+@app.route('/manual-sync-multiple', methods=['POST'])
+def manual_sync_multiple():
+    if not session.get('logged_in'):
+        return redirect(url_for('index'))
+
+    selected_screens = request.form.getlist('selected_screens')
+    if not selected_screens:
+        return "No screens selected", 400
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Set force_resync=1 for each selected screen_id
+    for screen_id in selected_screens:
+        c.execute('''
+            INSERT INTO screen_flags (screen_id, force_resync)
+            VALUES (?, 1)
+            ON CONFLICT(screen_id) DO UPDATE SET force_resync=1
+        ''', (screen_id,))
+
+    conn.commit()
+    conn.close()
+
+    print(f"🔁 Manual sync flag set for screens: {', '.join(selected_screens)}")
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/set-master/<int:id>', methods=['POST'])
+def set_master(id):
+    if not session.get('logged_in'):
+        return redirect(url_for('index'))
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Find location for this screen
+    c.execute('SELECT area, building, floor, restroom FROM screens WHERE id = ?', (id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return "Screen not found", 404
+
+    area, building, floor, restroom = row
+
+    # Clear any existing master for this group
+    c.execute('''
+        UPDATE screens
+        SET is_master = 0
+        WHERE area = ? AND building = ? AND floor = ? AND restroom = ?
+    ''', (area, building, floor, restroom))
+
+    # Set the chosen screen as master
+    c.execute('UPDATE screens SET is_master = 1 WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+
+    print(f"⭐ Screen {id} set as master for {area}/{building}/{floor}/{restroom}")
+    return redirect(url_for('screens'))
+
+
+
+@app.route('/sync-group', methods=['POST'])
+def sync_group():
+    if not session.get('logged_in'):
+        return redirect(url_for('index'))
+
+    location_key = request.form.get('location_key')
+    if not location_key:
+        return redirect(url_for('screens'))
+
+    try:
+        area, building, floor, restroom = [part.strip() for part in location_key.split('/')]
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Find master screen for this group
+        c.execute('''
+            SELECT id FROM screens
+            WHERE area=? AND building=? AND floor=? AND restroom=? AND is_master=1
+        ''', (area, building, floor, restroom))
+        master_row = c.fetchone()
+
+        if not master_row:
+            conn.close()
+            return f"No master screen set for {location_key}", 400
+
+        master_id = master_row[0]
+
+        # Fetch master's playlist assignments
+        c.execute('''
+            SELECT content_id, play_order, start_time, end_time
+            FROM screen_content
+            WHERE screen_id=?
+        ''', (master_id,))
+        master_assignments = c.fetchall()
+
+        # Get all other screens in this group (slaves)
+        c.execute('''
+            SELECT id FROM screens
+            WHERE area=? AND building=? AND floor=? AND restroom=? AND id != ?
+        ''', (area, building, floor, restroom, master_id))
+        slave_ids = [row[0] for row in c.fetchall()]
+
+        # Replace assignments for each slave
+        for sid in slave_ids:
+            # Remove old assignments
+            c.execute('DELETE FROM screen_content WHERE screen_id=?', (sid,))
+            # Copy from master
+            for content_id, play_order, start_time, end_time in master_assignments:
+                c.execute('''
+                    INSERT INTO screen_content (screen_id, content_id, play_order, start_time, end_time)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (sid, content_id, play_order, start_time, end_time))
+            # Trigger sync flag
+            c.execute('''
+                INSERT INTO screen_flags (screen_id, force_resync)
+                VALUES (?, 1)
+                ON CONFLICT(screen_id) DO UPDATE SET force_resync=1
+            ''', (sid,))
+
+        conn.commit()
+        conn.close()
+
+        print(f"🔄 Synced group {location_key} from master {master_id} to {len(slave_ids)} screens")
+        return redirect(url_for('screens'))
+
+    except Exception as e:
+        print("❌ Error in sync_group:", e)
+        return "Internal server error", 500
+
 
 
 

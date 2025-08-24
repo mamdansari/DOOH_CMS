@@ -32,11 +32,27 @@ async function loadPlaylist() {
 function startPlayback(syncPosition) {
   const player = document.getElementById('player');
 
-  // Calculate total duration
-  const durations = playlist.map(item =>
-    item.filename.match(/\.(mp4|webm|ogg)$/i) ? 10 : 5 // assume default duration
-  );
+  if (!playlist || playlist.length === 0) {
+    console.error("Playlist is empty or undefined. Cannot start playback.");
+    player.innerHTML = '<p class="text-red-600">No content available.</p>';
+    return;
+  }
+
+  // Calculate total duration with safety fallback
+  const durations = playlist.map(item => {
+    const d = Number(item?.duration);
+    if (!isNaN(d) && d > 0) return d;
+    // Fallbacks if duration not provided
+    if (!item || !item.filename) return 5;
+    return /\.(mp4|webm|ogg)$/i.test(item.filename) ? 10 : 5;
+    });
+
   const totalDuration = durations.reduce((a, b) => a + b, 0);
+  if (totalDuration === 0) {
+    console.error("Total playlist duration is zero, cannot start playback.");
+    player.innerHTML = '<p class="text-red-600">Playlist has zero duration.</p>';
+    return;
+  }
 
   // Wrap position within totalDuration
   let timeOffset = syncPosition % totalDuration;
@@ -47,51 +63,60 @@ function startPlayback(syncPosition) {
     timeOffset -= durations[index];
     index++;
   }
-  if (index >= playlist.length) {
-    index = 0;
-  }
+  if (index >= playlist.length) index = 0;
 
   playItem(index, timeOffset);
 }
 
-
 function playItem(index, offset = 0) {
+  if (!playlist?.length) {
+    console.error("Playlist is empty. Cannot play item.");
+    return;
+  }
+
   const item = playlist[index];
+  if (!item?.filename) {
+    console.error("Playlist item missing or filename undefined at index", index);
+    return;
+  }
+
   const player = document.getElementById('player');
   const ext = item.filename.split('.').pop().toLowerCase();
-  const isVideo = videoExtensions.includes(ext);
+  const isVideo = ['mp4', 'webm', 'ogg'].includes(ext);
 
-  player.innerHTML = '';
+  // duration assigned by the server (fallback: 10 s for video, 5 s for image)
+  const assigned = Number(item.duration) > 0
+      ? Number(item.duration)
+      : (isVideo ? 10 : 5);
 
-  if (!playlist || playlist.length === 0) {
-    console.error("Playlist is empty");
-    return;
-  }
-
-  if (!item) {
-    console.error("Item undefined at index", index);
-    return;
-  }
-
+  const remaining = Math.max(0.1, assigned - offset);   // seconds still to play
+  player.innerHTML = '';                                // clear previous content
 
   if (isVideo) {
     const video = document.createElement('video');
     video.src = `/uploads/${item.filename}`;
     video.autoplay = true;
-    video.controls = false;
     video.muted = true;
     video.style.width = '100%';
     video.style.height = '100%';
     player.appendChild(video);
 
+    // jump to the correct offset for group sync
     video.addEventListener('loadedmetadata', () => {
       video.currentTime = offset;
     });
 
+    // advance immediately if the file ends early
+    video.addEventListener('ended', () => {
+      playItem((index + 1) % playlist.length, 0);
+    });
+
+    // force-advance after the assigned window
     setTimeout(() => {
-      playItem((index + 1) % playlist.length);
-    }, ((video.duration || 10) - offset) * 1000);
-  } else {
+      playItem((index + 1) % playlist.length, 0);
+    }, remaining * 1000);
+
+  } else { // IMAGE
     const img = document.createElement('img');
     img.src = `/uploads/${item.filename}`;
     img.style.width = '100%';
@@ -99,10 +124,12 @@ function playItem(index, offset = 0) {
     player.appendChild(img);
 
     setTimeout(() => {
-      playItem((index + 1) % playlist.length);
-    }, (5 - offset) * 1000);
+      playItem((index + 1) % playlist.length, 0);
+    }, remaining * 1000);
   }
 }
+
+
 
 
 async function captureSnapshot() {
@@ -240,7 +267,7 @@ setInterval(() => {
   })
   .then(data => console.log("📡 Ping sent", data))
   .catch(err => console.error("Ping error:", err));
-}, 300000); // every 30 seconds
+}, 15 * 60 * 1000); // every 15 minutes
 
 let tapCount = 0;
 let lastTapTime = 0;

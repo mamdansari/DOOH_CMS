@@ -1,6 +1,8 @@
+import os
 import sqlite3
-
-conn = sqlite3.connect('db.sqlite')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'db.sqlite')
+conn = sqlite3.connect(DB_PATH)
 
 # Create Screens table
 conn.execute('''
@@ -14,7 +16,8 @@ CREATE TABLE IF NOT EXISTS screens (
     manual_sync_group TEXT,
     group_id TEXT,  -- for sync grouping
     status TEXT DEFAULT 'offline',
-    last_seen TEXT
+    last_seen TEXT,
+    is_master INTEGER DEFAULT 0  -- Master flag
 )
 ''')
 
@@ -39,6 +42,7 @@ CREATE TABLE IF NOT EXISTS screen_content (
     play_order INTEGER,
     start_time TEXT,
     end_time TEXT,
+    play_duration INTEGER DEFAULT 10,  -- new column added for duration in seconds
     FOREIGN KEY(screen_id) REFERENCES screens(id),
     FOREIGN KEY(content_id) REFERENCES content(id)
 )
